@@ -66,7 +66,9 @@ final class InovioClient
         ?HttpClient $httpClient = null,
         ?string $apiVersion = null,
         int $timeoutMs = self::DEFAULT_TIMEOUT_MS,
-        ?string $tokenEndpoint = null
+        ?string $tokenEndpoint = null,
+        /** Per-site HMAC secret for the token service (§4.8); tokenize() only. */
+        private ?string $siteKey = null
     ) {
         $this->endpoint = $endpoint
             ?? ($environment === 'PRODUCTION'
@@ -179,28 +181,36 @@ final class InovioClient
     }
 
     /**
-     * Ephemeral tokenization (spec §4.8).
+     * Ephemeral tokenization (spec §4.8) — exchange a PAN for a single-use
+     * TOKEN_GUID usable in place of PMT_NUMB.
      *
-     * NOTE: this server-side call still touches the PAN and therefore keeps the
-     * caller in PCI scope. The lower-scope path is the browser Hosted Fields
-     * client, which tokenizes without the PAN reaching your server.
+     * Requires $siteKey on the constructor — the per-site HMAC secret issued by
+     * Inovio support. It is NOT the gateway password; without it the token
+     * service answers error 121.
+     *
+     * NOTE: this is a server-side call — the PAN passes through your
+     * infrastructure, so you remain in PCI scope. The low-scope path is the
+     * browser Hosted Fields client.
      */
-    public function tokenize(Card $card): Token
+    public function tokenize(Card $card, ?string $uniqueId = null): TokenizeResult
     {
-        $p = $this->authParams('TOKENIZE');
-        $p['PMT_NUMB'] = $card->number();
-        $p['PMT_EXPIRY'] = $card->expiry();
-        if ($card->cvv() !== null) {
-            $p['PMT_KEY'] = $card->cvv();
-        }
-        $raw = Transport::send($this->tokenEndpoint, $this->http, $this->timeoutMs, $p);
-        $this->raiseIfApiError($raw);
-        $guid = $raw['TOKEN_GUID'] ?? $raw['TOKEN'] ?? $raw['TOKEN_ID'] ?? null;
-        if ($guid === null) {
-            throw new ConfigurationException('token service did not return a TOKEN_GUID', null, $raw);
+        if ($this->siteKey === null || $this->siteKey === '') {
+            throw new ValidationException(
+                'tokenize requires $siteKey on the client — the per-site HMAC secret '
+                . 'from Inovio support (not your gateway password).'
+            );
         }
 
-        return PaymentMethods::token($guid);
+        return Tokenize::tokenize(
+            $card,
+            $this->tokenEndpoint,
+            $this->http,
+            $this->timeoutMs,
+            $this->credentials->siteId,
+            $this->siteKey,
+            $this->apiVersion,
+            $uniqueId
+        );
     }
 
     /** TESTAUTH — verify credentials. */

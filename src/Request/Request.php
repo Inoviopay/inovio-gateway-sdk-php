@@ -105,7 +105,11 @@ final class RequestBuilder
             self::put($p, 'PMT_EXPIRY', $pm->expiry());
             self::put($p, 'PMT_KEY', $pm->cvv());
         } elseif ($pm instanceof Token) {
+            // The token stands in for the PAN only — the transaction service
+            // still requires the expiry (and CVV where the processor asks).
             self::put($p, 'TOKEN_GUID', $pm->guid());
+            self::put($p, 'PMT_EXPIRY', $pm->expiry());
+            self::put($p, 'PMT_KEY', $pm->cvv());
         } elseif ($pm instanceof SavedCard) {
             self::put($p, 'PMT_ID', $pm->pmtId());
             self::put($p, 'PMT_ID_XTL', $pm->pmtIdXtl());

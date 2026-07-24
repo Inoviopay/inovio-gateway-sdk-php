@@ -18,9 +18,10 @@ final class PaymentMethods
         return new Card($number, $expiry, $cvv);
     }
 
-    public static function token(string $guid): Token
+    /** @param string|null $expiry MMYYYY — required when the token is used to transact. */
+    public static function token(string $guid, ?string $expiry = null, ?string $cvv = null): Token
     {
-        return new Token($guid);
+        return new Token($guid, $expiry, $cvv);
     }
 
     public static function savedCard(

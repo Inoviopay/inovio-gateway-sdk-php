@@ -117,14 +117,16 @@ final class Transport
         HttpClient $client,
         int $timeoutMs,
         array $params,
-        ?string $idempotencyKey = null
+        ?string $idempotencyKey = null,
+        array $extraHeaders = []
     ): array {
+        // $extraHeaders carries X-SIGNATURE/X-TIMESTAMP for the token service.
         $body = self::formEncode($params);
         try {
-            $res = $client->post($endpoint, $body, [
+            $res = $client->post($endpoint, $body, array_merge([
                 'Content-Type' => 'application/x-www-form-urlencoded',
                 'Accept' => 'application/json',
-            ], $timeoutMs);
+            ], $extraHeaders), $timeoutMs);
         } catch (TimeoutSignal $e) {
             throw new GatewayTimeoutException(
                 'gateway did not respond within ' . $timeoutMs

@@ -85,6 +85,42 @@ Do not edit. The `retryable`/`terminal`/`stopRecurring` and AVS/CVV
 classifications are **derived, not from the spec** — see
 [`spec/README.md`](spec/README.md).
 
+## Tokenization (spec §4.8)
+
+`tokenize()` exchanges a PAN for a single-use `TOKEN_GUID` that replaces
+`PMT_NUMB` on a later sale or authorize. It hits a **different endpoint**
+(`token_service.cfm`) with **different auth** — HMAC headers, not
+username/password.
+
+You need a **site key**: a per-site HMAC secret issued by Inovio support. It is
+*not* your gateway password. Without it the service answers error 121.
+
+Two things the SDK handles that the spec will mislead you on:
+
+**1. The signed message excludes the PAN.** The v4.14 PDF's §4.8.1.2 note says
+the HMAC covers `card_pan`, and its worked example agrees — but the gateway
+does not. `CRPT.TOKEN_PKG` validates:
+
+```
+hmac_sha256(timestamp || unique_id || site_id, site_key)
+```
+
+Signing with the PAN included fails with error 121. This SDK follows the
+gateway, verified against live T1.
+
+**2. A token replaces the PAN only.** The transaction still needs the expiry
+(and CVV where the processor asks), so `tokenize()` carries them forward onto
+the returned token. Sending a bare `TOKEN_GUID` yields API 110 `Required field`
+on `REF_FIELD=pmt_expiry`.
+
+BIN metadata (`brand`, `bank`, `country`, ...) is best-effort: the service
+returns those keys **empty** when the BIN is not in its lookup table, and the
+SDK normalizes blanks to null/undefined so you can test for presence.
+
+⚠️ This is a **server-side** call — the PAN passes through your infrastructure,
+so you remain in PCI scope. The low-scope path is the browser Hosted Fields
+client, which is not built yet.
+
 ## Vendored spec artifacts
 
 This repo **stands alone**: `spec/spec-enums.json` and
