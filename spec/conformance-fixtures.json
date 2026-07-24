@@ -811,6 +811,37 @@
         "net.amount": "1",
         "outstanding.amount": "0"
       }
+    },
+    {
+      "name": "capture-line-item/requires-parent-order-and-amount",
+      "description": "Per spec §5.5.6 a line-item capture MUST send REQUEST_REF_PO_ID and LI_VALUE_1 alongside REQUEST_REF_PO_LI_ID. Sending the line-item id alone is rejected with API 113 'Invalid Data' — verified against the live T1 gateway. The mocked corpus could not catch this because a mock accepts any request.",
+      "request": {
+        "operation": "captureLineItem",
+        "orderRef": "PO-5000",
+        "lineItemRef": "LI-1",
+        "amount": {
+          "amount": "1.00",
+          "currency": "USD"
+        }
+      },
+      "response": {
+        "REQUEST_ACTION": "CCCAPTURE",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "1.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-5000",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expectRequestParams": {
+        "REQUEST_ACTION": "CCCAPTURE",
+        "REQUEST_REF_PO_ID": "PO-5000",
+        "REQUEST_REF_PO_LI_ID": "LI-1",
+        "LI_VALUE_1": "1.00"
+      },
+      "expect": {
+        "status": "APPROVED"
+      }
     }
   ]
 }

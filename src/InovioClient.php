@@ -101,12 +101,26 @@ final class InovioClient
         );
     }
 
-    /** CCCAPTURE against a single line item. */
-    public function captureLineItem(LineItemRef $item, ?Money $amount = null): TransactionResult
-    {
-        return ResultMapper::toTransactionResult(
-            $this->call('CCCAPTURE', $this->refParams('REQUEST_REF_PO_LI_ID', $item->poLiId(), $amount))
-        );
+    /**
+     * CCCAPTURE against a single line item.
+     *
+     * Per spec §5.5.6 the gateway requires the PARENT ORDER and an amount
+     * alongside the line-item id — sending REQUEST_REF_PO_LI_ID alone is
+     * rejected with API 113 "Invalid Data". LineItemRef does not carry its
+     * order, so both must be passed. Verified against the live T1 gateway.
+     */
+    public function captureLineItem(
+        OrderRef $order,
+        LineItemRef $item,
+        Money $amount
+    ): TransactionResult {
+        return ResultMapper::toTransactionResult($this->call('CCCAPTURE', [
+            'REQUEST_REF_PO_ID' => $order->poId(),
+            'REQUEST_REF_PO_LI_ID' => $item->poLiId(),
+            'LI_VALUE_1' => $amount->toWire(),
+            'LI_COUNT_1' => '1',
+            'REQUEST_CURRENCY' => $amount->currency(),
+        ]));
     }
 
     /** CCREVERSE — void the original authorization. */
