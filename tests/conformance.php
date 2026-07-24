@@ -49,6 +49,8 @@ final class MockHttp implements HttpClient
             throw new TimeoutSignal('simulated timeout');
         }
 
+        // Fixtures carry either a flat field map or a CCSTATUS COLUMNS/DATA
+        // table; both are replayed verbatim as the gateway would send them.
         return new HttpResponse(200, json_encode($this->response, JSON_THROW_ON_ERROR));
     }
 }
@@ -307,15 +309,17 @@ check($t, 'throws GatewayTimeoutException', $caught instanceof GatewayTimeoutExc
 check($t, 'error.xtlOrderId', $caught instanceof GatewayTimeoutException ? $caught->xtlOrderId() : null, 'ORD-TIMEOUT-1');
 
 // ------------------------------------------------------------------ status
+// CCSTATUS answers with a COLUMNS/DATA table (one row per leg), NOT flat
+// indexed fields — verified against the live T1 gateway. Credit and void legs
+// arrive with a NEGATIVE TRANS_VALUE.
 $t = 'status/net-position-multi-leg';
 $http = new MockHttp([
-    'PO_ID' => 'PO-2000', 'CURR_CODE_ALPHA' => 'USD', 'API_RESPONSE' => '0',
-    'REQUEST_ACTION_1' => 'CCAUTHORIZE', 'TRANS_STATUS_NAME_1' => 'APPROVED',
-    'TRANS_VALUE_1' => '100.00', 'TRANS_ID_1' => 'T-1',
-    'REQUEST_ACTION_2' => 'CCCAPTURE', 'TRANS_STATUS_NAME_2' => 'APPROVED',
-    'TRANS_VALUE_2' => '60.00', 'TRANS_ID_2' => 'T-2',
-    'REQUEST_ACTION_3' => 'CCCREDIT', 'TRANS_STATUS_NAME_3' => 'APPROVED',
-    'TRANS_VALUE_3' => '10.00', 'TRANS_ID_3' => 'T-3',
+    'COLUMNS' => ['REQUEST_ACTION','TRANS_STATUS_NAME','TRANS_VALUE','TRANS_ID','PO_ID','XTL_ORDER_ID','CURR_CODE_ALPHA'],
+    'DATA' => [
+        ['CCAUTHORIZE','APPROVED',100.00,'T-1','PO-2000','ORD-2000','USD'],
+        ['CCCAPTURE','APPROVED',60.00,'T-2','PO-2000','','USD'],
+        ['CCCREDIT','APPROVED',-10.00,'T-3','PO-2000','','USD'],
+    ],
 ]);
 $s = client($http)->status(Refs::order('PO-2000'));
 check($t, 'transactions.length', count($s->transactions), 3);
@@ -324,6 +328,33 @@ check($t, 'captured', $s->captured->toWire(), '60');
 check($t, 'refunded', $s->refunded->toWire(), '10');
 check($t, 'net', $s->net->toWire(), '50');
 check($t, 'outstanding', $s->outstanding->toWire(), '40');
+
+// A CCREVERSE is a VOID, not a refund: it releases the authorization rather
+// than returning captured funds, so it must reduce `authorized`.
+$t = 'status/voided-auth-nets-to-zero';
+$http = new MockHttp([
+    'COLUMNS' => ['REQUEST_ACTION','TRANS_STATUS_NAME','TRANS_VALUE','TRANS_ID','PO_ID','CURR_CODE_ALPHA'],
+    'DATA' => [
+        ['CCAUTHORIZE','APPROVED',2.00,'T-10','PO-3000','USD'],
+        ['CCREVERSE','APPROVED',-2.00,'T-11','PO-3000','USD'],
+    ],
+]);
+$s = client($http)->status(Refs::order('PO-3000'));
+check($t, 'authorized released', $s->authorized->toWire(), '0');
+check($t, 'net', $s->net->toWire(), '0');
+check($t, 'outstanding', $s->outstanding->toWire(), '0');
+
+// CCAUTHCAP authorizes AND captures in one leg — it must count as both.
+$t = 'status/sale-counts-as-authorized-and-captured';
+$http = new MockHttp([
+    'COLUMNS' => ['REQUEST_ACTION','TRANS_STATUS_NAME','TRANS_VALUE','TRANS_ID','PO_ID','CURR_CODE_ALPHA'],
+    'DATA' => [['CCAUTHCAP','APPROVED',1.00,'T-20','PO-4000','USD']],
+]);
+$s = client($http)->status(Refs::order('PO-4000'));
+check($t, 'authorized', $s->authorized->toWire(), '1');
+check($t, 'captured', $s->captured->toWire(), '1');
+check($t, 'net', $s->net->toWire(), '1');
+check($t, 'outstanding', $s->outstanding->toWire(), '0');
 
 // ------------------------------------------------------------------- misc
 $t = 'money/rejects-float';

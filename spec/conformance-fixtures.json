@@ -583,39 +583,6 @@
       }
     },
     {
-      "name": "status/net-position-multi-leg",
-      "description": "Order-level aggregation: auth 100, capture 60, refund 10 -> net 50, outstanding 40.",
-      "request": {
-        "operation": "status",
-        "orderRef": "PO-2000"
-      },
-      "response": {
-        "PO_ID": "PO-2000",
-        "CURR_CODE_ALPHA": "USD",
-        "API_RESPONSE": "0",
-        "REQUEST_ACTION_1": "CCAUTHORIZE",
-        "TRANS_STATUS_NAME_1": "APPROVED",
-        "TRANS_VALUE_1": "100.00",
-        "TRANS_ID_1": "T-1",
-        "REQUEST_ACTION_2": "CCCAPTURE",
-        "TRANS_STATUS_NAME_2": "APPROVED",
-        "TRANS_VALUE_2": "60.00",
-        "TRANS_ID_2": "T-2",
-        "REQUEST_ACTION_3": "CCCREDIT",
-        "TRANS_STATUS_NAME_3": "APPROVED",
-        "TRANS_VALUE_3": "10.00",
-        "TRANS_ID_3": "T-3"
-      },
-      "expect": {
-        "transactions.length": 3,
-        "authorized.amount": "100.00",
-        "captured.amount": "60.00",
-        "refunded.amount": "10.00",
-        "net.amount": "50.00",
-        "outstanding.amount": "40.00"
-      }
-    },
-    {
       "name": "money/rejects-float",
       "description": "Money must refuse binary floats — decimal amounts only.",
       "request": {
@@ -707,6 +674,142 @@
         "savedCardRef": null,
         "batchId": null,
         "card": null
+      }
+    },
+    {
+      "name": "status/net-position-multi-leg",
+      "description": "CCSTATUS answers with a COLUMNS/DATA table (one row per leg), NOT flat indexed fields — verified against the live T1 gateway; the v4.14 response-fields section does not describe this shape. auth 100, capture 60, refund 10 -> net 50, outstanding 40. Note credit legs arrive with a NEGATIVE TRANS_VALUE.",
+      "request": {
+        "operation": "status",
+        "orderRef": "PO-2000"
+      },
+      "response": {
+        "COLUMNS": [
+          "REQUEST_ACTION",
+          "TRANS_STATUS_NAME",
+          "TRANS_VALUE",
+          "TRANS_ID",
+          "PO_ID",
+          "XTL_ORDER_ID",
+          "CURR_CODE_ALPHA"
+        ],
+        "DATA": [
+          [
+            "CCAUTHORIZE",
+            "APPROVED",
+            100.0,
+            "T-1",
+            "PO-2000",
+            "ORD-2000",
+            "USD"
+          ],
+          [
+            "CCCAPTURE",
+            "APPROVED",
+            60.0,
+            "T-2",
+            "PO-2000",
+            "",
+            "USD"
+          ],
+          [
+            "CCCREDIT",
+            "APPROVED",
+            -10.0,
+            "T-3",
+            "PO-2000",
+            "",
+            "USD"
+          ]
+        ]
+      },
+      "expect": {
+        "transactions.length": 3,
+        "authorized.amount": "100",
+        "captured.amount": "60",
+        "refunded.amount": "10",
+        "net.amount": "50",
+        "outstanding.amount": "40"
+      }
+    },
+    {
+      "name": "status/voided-auth-nets-to-zero",
+      "description": "A CCREVERSE is a VOID, not a refund: it releases the authorization rather than returning captured funds. It must reduce `authorized`, not inflate `refunded` — a voided auth settles to net 0 with nothing outstanding. Verified on the live T1 gateway.",
+      "request": {
+        "operation": "status",
+        "orderRef": "PO-3000"
+      },
+      "response": {
+        "COLUMNS": [
+          "REQUEST_ACTION",
+          "TRANS_STATUS_NAME",
+          "TRANS_VALUE",
+          "TRANS_ID",
+          "PO_ID",
+          "CURR_CODE_ALPHA"
+        ],
+        "DATA": [
+          [
+            "CCAUTHORIZE",
+            "APPROVED",
+            2.0,
+            "T-10",
+            "PO-3000",
+            "USD"
+          ],
+          [
+            "CCREVERSE",
+            "APPROVED",
+            -2.0,
+            "T-11",
+            "PO-3000",
+            "USD"
+          ]
+        ]
+      },
+      "expect": {
+        "transactions.length": 2,
+        "authorized.amount": "0",
+        "captured.amount": "0",
+        "refunded.amount": "0",
+        "net.amount": "0",
+        "outstanding.amount": "0"
+      }
+    },
+    {
+      "name": "status/sale-counts-as-authorized-and-captured",
+      "description": "CCAUTHCAP authorizes AND captures in a single leg. It must count toward BOTH `authorized` and `captured` — otherwise a sale() reports captured=0 with the full amount outstanding, the opposite of what happened. Verified on the live T1 gateway.",
+      "request": {
+        "operation": "status",
+        "orderRef": "PO-4000"
+      },
+      "response": {
+        "COLUMNS": [
+          "REQUEST_ACTION",
+          "TRANS_STATUS_NAME",
+          "TRANS_VALUE",
+          "TRANS_ID",
+          "PO_ID",
+          "CURR_CODE_ALPHA"
+        ],
+        "DATA": [
+          [
+            "CCAUTHCAP",
+            "APPROVED",
+            1.0,
+            "T-20",
+            "PO-4000",
+            "USD"
+          ]
+        ]
+      },
+      "expect": {
+        "transactions.length": 1,
+        "authorized.amount": "1",
+        "captured.amount": "1",
+        "refunded.amount": "0",
+        "net.amount": "1",
+        "outstanding.amount": "0"
       }
     }
   ]

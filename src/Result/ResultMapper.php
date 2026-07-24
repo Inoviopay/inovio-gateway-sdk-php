@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Inovio\Gateway\Result;
 
 use Inovio\Gateway\Enums\Generated;
+use Inovio\Gateway\Errors\TransportException;
 use Inovio\Gateway\Model\Money;
 use Inovio\Gateway\Refs\Refs;
 
@@ -125,41 +126,98 @@ final class ResultMapper
         }
         $currency ??= $r['CURR_CODE_ALPHA'] ?? 'USD';
 
-        $auth = '0';
+        // Four distinct leg kinds — conflating void with refund gets the
+        // maths wrong.
+        //
+        //   CCAUTHORIZE / CCAUTHCAP  : establishes the authorized amount
+        //   CCCAPTURE                : draws down against the authorization
+        //   CCCREDIT                 : refunds a capture (money returned)
+        //   CCREVERSE / CCREVERSECAP : VOIDS — cancels an authorization or a
+        //                              capture. A void is not a refund: it
+        //                              releases the hold, so it reduces
+        //                              `authorized` rather than inflating
+        //                              `refunded`. Verified on the live T1
+        //                              gateway, where a voided auth nets to 0
+        //                              with nothing outstanding.
+        //
+        // Credit and void legs arrive with a NEGATIVE TRANS_VALUE, so their
+        // magnitudes are taken before aggregating.
+        $authGross = '0';
         $cap = '0';
-        $ref = '0';
+        $voided = '0';
+        $refundedAmt = '0';
         $settled = $legs !== [];
         foreach ($legs as $l) {
             $a = strtoupper($l->action);
             $isAuth = str_contains($a, 'AUTHORIZE') || str_contains($a, 'AUTHCAP');
-            $isCapture = str_contains($a, 'CAPTURE') && !str_contains($a, 'REVERSECAP');
-            $isRefund = str_contains($a, 'CREDIT') || str_contains($a, 'REVERSE');
+            // CCAUTHCAP authorizes AND captures in one leg, so it counts as
+            // both — otherwise sale() reports captured=0 with the full amount
+            // outstanding. Verified on the live T1 gateway.
+            $isCapture = (str_contains($a, 'CAPTURE') || str_contains($a, 'AUTHCAP'))
+                && !str_contains($a, 'REVERSECAP');
+            $isVoid = str_contains($a, 'REVERSE');
+            $isRefund = str_contains($a, 'CREDIT');
             if ($l->amount !== null && $l->status === 'APPROVED') {
+                $v = $l->amount->amount();
+                $mag = ltrim($v, '-');
+                // NOT exclusive: CCAUTHCAP is both an auth and a capture, so
+                // it must land in both buckets. An if/elseif chain would credit
+                // only the first match and report captured=0 on every sale().
                 if ($isAuth) {
-                    $auth = bcadd($auth, $l->amount->amount(), 8);
-                } elseif ($isCapture) {
-                    $cap = bcadd($cap, $l->amount->amount(), 8);
-                } elseif ($isRefund) {
-                    $ref = bcadd($ref, $l->amount->amount(), 8);
+                    $authGross = bcadd($authGross, $v, 8);
+                }
+                if ($isCapture) {
+                    $cap = bcadd($cap, $v, 8);
+                }
+                if ($isVoid) {
+                    $voided = bcadd($voided, $mag, 8);
+                }
+                if ($isRefund) {
+                    $refundedAmt = bcadd($refundedAmt, $mag, 8);
                 }
             }
             if ($isAuth && !$l->settled) {
                 $settled = false;
             }
         }
+        $auth = bcsub($authGross, $voided, 8);
+
+        // The tabular CCSTATUS payload carries no top-level PO_ID — it lives on
+        // each leg. Fall back to the legs so the aggregate is keyed correctly.
+        $poId = $r['PO_ID'] ?? null;
+        if ($poId === null || $poId === '') {
+            foreach ($legs as $l) {
+                if ($l->orderRef !== null) {
+                    $poId = $l->orderRef->poId();
+                    break;
+                }
+            }
+        }
+        if ($poId === null || $poId === '') {
+            throw new TransportException('CCSTATUS response carried no PO_ID on any leg');
+        }
+        $xtl = $r['XTL_ORDER_ID'] ?? null;
+        if ($xtl === null || $xtl === '') {
+            foreach ($legs as $l) {
+                if ($l->xtlOrderRef !== null) {
+                    $xtl = $l->xtlOrderRef->value();
+                    break;
+                }
+            }
+        }
 
         $fmt = static fn (string $v): string => rtrim(rtrim($v, '0'), '.') ?: '0';
 
         return new OrderStatus(
-            ref: Refs::order($r['PO_ID'] ?? 'unknown'),
+            ref: Refs::order($poId),
             transactions: $legs,
             settled: $settled,
             raw: $r,
             xtlRef: self::val($r, 'XTL_ORDER_ID') !== null ? Refs::xtlOrder(self::val($r, 'XTL_ORDER_ID')) : null,
             authorized: Money::of($fmt($auth), $currency),
             captured: Money::of($fmt($cap), $currency),
-            refunded: Money::of($fmt($ref), $currency),
-            net: Money::of($fmt(bcsub($cap, $ref, 8)), $currency),
+            refunded: Money::of($fmt($refundedAmt), $currency),
+            net: Money::of($fmt(bcsub($cap, $refundedAmt, 8)), $currency),
             outstanding: Money::of($fmt(bcsub($auth, $cap, 8)), $currency)
         );
     }

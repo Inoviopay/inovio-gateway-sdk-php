@@ -76,6 +76,14 @@ final class Transport
             if (!is_array($parsed)) {
                 throw new TransportException('gateway returned malformed JSON');
             }
+            // CCSTATUS answers with a COLUMNS/DATA table rather than flat
+            // fields. Flattening would destroy the row structure, so pass it
+            // through untouched for the client to expand.
+            if (isset($parsed['COLUMNS'], $parsed['DATA'])
+                && is_array($parsed['COLUMNS']) && is_array($parsed['DATA'])) {
+                return ['__TABULAR__' => $trimmed];
+            }
+
             $flatten = static function ($obj, string $prefix = '') use (&$flatten, $put): void {
                 foreach ($obj as $k => $v) {
                     if (is_array($v)) {

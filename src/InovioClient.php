@@ -321,41 +321,49 @@ final class InovioClient
     }
 
     /**
-     * CCSTATUS returns multiple transactions flattened with indexed keys; split
-     * them back into per-leg field maps.
+     * CCSTATUS does not answer with flat fields like every other action — it
+     * returns a tabular payload:
+     *
+     *   {"COLUMNS": ["REQUEST_ACTION","TRANS_STATUS_NAME",...],
+     *    "DATA":    [["CCAUTHORIZE","APPROVED",...], ["CCCAPTURE",...]]}
+     *
+     * One DATA row per leg against the order. Verified against the live T1
+     * gateway; this shape is not described in the v4.14 response-fields section.
      *
      * @param array<string,string> $raw
      * @return array<int,array<string,string>>
      */
     private static function extractLegs(array $raw): array
     {
-        $indexed = [];
-        foreach ($raw as $k => $v) {
-            if (preg_match('/^(.*?)_(\d+)$/', (string) $k, $m) !== 1) {
+        $tabular = $raw['__TABULAR__'] ?? null;
+        if ($tabular === null) {
+            return [];
+        }
+        $parsed = json_decode($tabular, true);
+        if (!is_array($parsed) || !isset($parsed['COLUMNS'], $parsed['DATA'])) {
+            return [];
+        }
+        $columns = $parsed['COLUMNS'];
+        $legs = [];
+        foreach ($parsed['DATA'] as $row) {
+            if (!is_array($row)) {
                 continue;
             }
-            [$_, $base, $idx] = $m;
-            if (preg_match('/^(TRANS_|REQUEST_ACTION|SERVICE_|PROCESSOR_|API_|AVS_|CVV_|PO_ID)/', $base) !== 1) {
-                continue;
+            $leg = [];
+            foreach ($columns as $i => $col) {
+                $v = $row[$i] ?? null;
+                if ($v === null || $v === '') {
+                    continue;
+                }
+                $name = strtoupper((string) $col);
+                // Duplicate column names appear (TRANS_ID twice); first wins.
+                if (!array_key_exists($name, $leg)) {
+                    $leg[$name] = (string) $v;
+                }
             }
-            $indexed[(int) $idx][$base] = $v;
-        }
-        ksort($indexed);
-
-        // Order-level fields apply to every leg — notably CURR_CODE_ALPHA,
-        // without which a leg has no currency and no amount can be built.
-        $inherited = [];
-        foreach (['PO_ID', 'XTL_ORDER_ID', 'CURR_CODE_ALPHA', 'MERCH_ACCT_ID'] as $k) {
-            if (isset($raw[$k])) {
-                $inherited[$k] = $raw[$k];
-            }
+            $legs[] = $leg;
         }
 
-        $out = [];
-        foreach ($indexed as $leg) {
-            $out[] = array_merge($inherited, $leg);
-        }
-
-        return $out;
+        return $legs;
     }
 }
