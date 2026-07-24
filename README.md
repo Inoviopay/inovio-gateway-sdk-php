@@ -117,8 +117,7 @@ BIN metadata (`brand`, `bank`, `country`, ...) is best-effort: the service
 returns those keys **empty** when the BIN is not in its lookup table, and the
 SDK normalizes blanks to null/undefined so you can test for presence.
 
-⚠️ This is a **server-side** call — the PAN passes through your infrastructure,
-so you remain in PCI scope. The low-scope path is the browser Hosted Fields
+⚠️ This is a **server-side** call — the PAN passes through your the card number passes through your server. The browser Hosted Fields client keeps it in the cardholder's browser
 client, which is not built yet.
 
 ## Vendored spec artifacts

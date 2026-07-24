@@ -203,7 +203,7 @@ final class InovioClient
      * service answers error 121.
      *
      * NOTE: this is a server-side call — the PAN passes through your
-     * infrastructure, so you remain in PCI scope. The low-scope path is the
+     * infrastructure, so you remain in your server's data flow. The low-scope path is the
      * browser Hosted Fields client.
      */
     public function tokenize(Card $card, ?string $uniqueId = null): TokenizeResult

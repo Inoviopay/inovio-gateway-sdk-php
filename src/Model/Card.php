@@ -6,7 +6,7 @@ namespace Inovio\Gateway\Model;
 
 use InvalidArgumentException;
 
-/** Raw PAN entry — puts the caller in PCI scope. Prefer {@see Token}. */
+/** Raw card-number entry — the number passes through your server. Prefer {@see Token}. */
 final class Card implements PaymentMethod
 {
     private string $number;

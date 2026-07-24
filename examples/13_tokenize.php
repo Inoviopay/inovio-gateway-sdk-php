@@ -9,7 +9,7 @@
  * gateway password. Without it the service answers error 121.
  *
  * ⚠️ This is a SERVER-SIDE call — the PAN passes through your infrastructure,
- * so you stay in PCI scope. The low-scope path is browser Hosted Fields.
+ * the card number passes through your server. The browser Hosted Fields client keeps it in the cardholder's browser.
  */
 require_once __DIR__ . '/_harness.php';
 
