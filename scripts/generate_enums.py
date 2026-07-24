@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate src/Enums/Generated.php from ../spec/spec-enums.json (decision D1)."""
+"""Generate src/Enums/Generated.php from this repo's spec/spec-enums.json (decision D1)."""
 import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SPEC = HERE.parent.parent / "spec" / "spec-enums.json"
+SPEC = HERE.parent / "spec" / "spec-enums.json"
 OUT = HERE.parent / "src" / "Enums" / "Generated.php"
 spec = json.loads(SPEC.read_text())
 A, ver = spec["appendices"], spec["apiVersion"]
@@ -20,11 +20,11 @@ def b(v):
 
 L = ["<?php", "", "declare(strict_types=1);", "", "namespace Inovio\\Gateway\\Enums;", "",
      "/**", " * GENERATED FILE — DO NOT EDIT.",
-     " *", f" * Source: Inovio Gateway Payments Service API v{ver} (api-sdk/spec/spec-enums.json)",
+     " *", f" * Source: Inovio Gateway Payments Service API v{ver} (spec/spec-enums.json)",
      " * Regenerate: python3 scripts/generate_enums.py", " *",
      " * Classifiers (retryable/terminal/stopRecurring, AVS/CVV classification and",
      " * the API-code -> exception mapping) are DERIVED by the SDK project, not",
-     " * stated in the spec. See api-sdk/spec/README.md.", " */", "final class Generated", "{",
+     " * stated in the spec. See spec/README.md.", " */", "final class Generated", "{",
      f"    public const SPEC_API_VERSION = {php(ver)};", ""]
 
 # Transaction statuses

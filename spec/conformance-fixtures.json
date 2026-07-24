@@ -1,0 +1,407 @@
+{
+  "$comment": "W0(b) — shared cross-language conformance fixtures (PLAN.md §5). Every SDK runs these against a mocked transport and must produce the SAME typed result. A fixture change is a coordinated change across all five SDKs. Field values are illustrative, not captured from production.",
+  "specVersion": "4.14",
+  "fixtures": [
+    {
+      "name": "approve/basic-sale",
+      "description": "Straightforward approved card sale.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030", "cvv": "123" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "10.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "10.00",
+        "CURR_CODE_ALPHA": "USD",
+        "TRANS_ID": "T-1001",
+        "PO_ID": "PO-1001",
+        "REQ_ID": "R-1001",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100",
+        "SERVICE_ADVICE": "User Authorized",
+        "PROCESSOR_RESPONSE": "00",
+        "TRANS_SETTLED": "0",
+        "CARD_BRAND_NAME": "VISA",
+        "PMT_L4": "1111"
+      },
+      "expect": {
+        "status": "APPROVED",
+        "settling": false,
+        "settled": false,
+        "orderRef.poId": "PO-1001",
+        "transactionId.value": "T-1001",
+        "amount.amount": "10.00",
+        "amount.currency": "USD",
+        "outcome.service.code": 100,
+        "serviceClassification.approval": true,
+        "serviceClassification.terminal": false,
+        "card.brand": "VISA",
+        "card.last4": "1111",
+        "conversion": null,
+        "nextAction": null
+      }
+    },
+    {
+      "name": "decline/service-tier-not-exception",
+      "description": "A decline MUST be a return value, never a thrown error (Q1).",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4000000000000002", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "25.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "DECLINED",
+        "TRANS_VALUE": "25.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1002",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "600",
+        "SERVICE_ADVICE": "Decline",
+        "PROCESSOR_RESPONSE": "05",
+        "PROCESSOR_ADVICE": "Do not honor"
+      },
+      "expect": {
+        "throws": false,
+        "status": "DECLINED",
+        "settling": false,
+        "outcome.service.code": 600,
+        "outcome.processor.advice": "Do not honor",
+        "serviceClassification.terminal": true,
+        "serviceClassification.retryable": false
+      }
+    },
+    {
+      "name": "decline/retryable-640",
+      "description": "Service code 640 is classified retryable — dunning logic branches on this.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "5.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "DECLINED",
+        "TRANS_VALUE": "5.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1003",
+        "SERVICE_RESPONSE": "640",
+        "API_RESPONSE": "0"
+      },
+      "expect": {
+        "throws": false,
+        "status": "DECLINED",
+        "serviceClassification.retryable": true,
+        "serviceClassification.terminal": false
+      }
+    },
+    {
+      "name": "decline/stop-recurring-219",
+      "description": "Service code 219 must flag stopRecurring so COF billing halts.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "savedCard", "pmtId": "PM-9" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "9.99", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "DECLINED",
+        "TRANS_VALUE": "9.99",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1004",
+        "SERVICE_RESPONSE": "219",
+        "API_RESPONSE": "0"
+      },
+      "expect": {
+        "throws": false,
+        "status": "DECLINED",
+        "serviceClassification.stopRecurring": true
+      }
+    },
+    {
+      "name": "avs/partial-street-match",
+      "description": "AVS 'A' = street matches, postal does not. Classified partial, NOT positive.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "1.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "1.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1005",
+        "SERVICE_RESPONSE": "100",
+        "API_RESPONSE": "0",
+        "AVS_RESPONSE": "A",
+        "CVV_RESPONSE": "M"
+      },
+      "expect": {
+        "status": "APPROVED",
+        "avs.code": "A",
+        "avs.classification": "partial",
+        "cvv.code": "M",
+        "cvv.classification": "match"
+      }
+    },
+    {
+      "name": "avs/negative-no-match",
+      "description": "AVS 'N' = nothing matched. Must classify negative, not partial.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "1.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "1.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1006",
+        "SERVICE_RESPONSE": "100",
+        "API_RESPONSE": "0",
+        "AVS_RESPONSE": "N",
+        "CVV_RESPONSE": "N"
+      },
+      "expect": {
+        "avs.classification": "negative",
+        "cvv.classification": "no_match"
+      }
+    },
+    {
+      "name": "3ds/challenge-pending",
+      "description": "3DS Outcome 1 — PENDING with a challenge nextAction. Must NOT read as failure.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "50.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "PENDING",
+        "TRANS_VALUE": "50.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1007",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100",
+        "PROC_REDIRECT_URL": "https://acs.example.invalid/challenge",
+        "P3DS_PROCTRANSID": "3DS-77",
+        "PAREQ": "eJxVUk1v"
+      },
+      "expect": {
+        "status": "PENDING",
+        "settling": true,
+        "nextAction.kind": "threeDSChallenge",
+        "nextAction.procTransId": "3DS-77",
+        "nextAction.redirectUrl": "https://acs.example.invalid/challenge"
+      }
+    },
+    {
+      "name": "3ds/frictionless-approved",
+      "description": "3DS Outcome 2 — frictionless approval, no nextAction.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "50.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "50.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1008",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expect": {
+        "status": "APPROVED",
+        "settling": false,
+        "nextAction": null
+      }
+    },
+    {
+      "name": "multicurrency/conversion-present",
+      "description": "Real FX: exchange rate present, so conversion IS reported.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "100.00", "currency": "EUR" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "100.00",
+        "CURR_CODE_ALPHA": "EUR",
+        "TRANS_VALUE_SETTLED": "108.50",
+        "CURR_CODE_ALPHA_SETTLED": "USD",
+        "TRANS_EXCH_RATE": "1.085",
+        "PO_ID": "PO-1009",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expect": {
+        "status": "APPROVED",
+        "conversion.amount.amount": "108.50",
+        "conversion.amount.currency": "USD",
+        "conversion.exchangeRate": "1.085"
+      }
+    },
+    {
+      "name": "multicurrency/no-conversion-domestic",
+      "description": "Domestic: settled fields echo the auth amount with no rate. conversion MUST be absent — otherwise it is always present and means nothing.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "20.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "20.00",
+        "CURR_CODE_ALPHA": "USD",
+        "TRANS_VALUE_SETTLED": "20.00",
+        "CURR_CODE_ALPHA_SETTLED": "USD",
+        "PO_ID": "PO-1010",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expect": {
+        "status": "APPROVED",
+        "conversion": null
+      }
+    },
+    {
+      "name": "partial-auth/approved-lesser-amount",
+      "description": "Partial authorization approves less than requested.",
+      "request": {
+        "operation": "authorize",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "100.00", "currency": "USD" } }],
+        "partialAuth": { "enabled": true, "minimumAmount": { "amount": "25.00", "currency": "USD" } }
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHORIZE",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "40.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1011",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expectRequestParams": { "PARTIAL_AUTH": "1", "PARTIAL_AUTH_MIN": "25.00" },
+      "expect": { "status": "APPROVED", "amount.amount": "40.00" }
+    },
+    {
+      "name": "idempotency/defaults-to-return-original",
+      "description": "Setting xtlOrderId must default UNIQUE_XTL_ORDER_ID=2 (retry-safe).",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "7.00", "currency": "USD" } }],
+        "idempotency": { "xtlOrderId": "ORD-555" }
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "APPROVED",
+        "TRANS_VALUE": "7.00",
+        "CURR_CODE_ALPHA": "USD",
+        "PO_ID": "PO-1012",
+        "XTL_ORDER_ID": "ORD-555",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expectRequestParams": { "XTL_ORDER_ID": "ORD-555", "UNIQUE_XTL_ORDER_ID": "2" },
+      "expect": { "status": "APPROVED", "xtlOrderRef.value": "ORD-555" }
+    },
+    {
+      "name": "api-error/authentication-throws",
+      "description": "API tier 101 is an exception, not a decline.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "1.00", "currency": "USD" } }]
+      },
+      "response": { "API_RESPONSE": "101", "API_ADVICE": "Invalid login information" },
+      "expect": { "throws": "AuthenticationError" }
+    },
+    {
+      "name": "api-error/validation-carries-reffield",
+      "description": "API 110 raises ValidationError and surfaces REF_FIELD.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "1.00", "currency": "USD" } }]
+      },
+      "response": { "API_RESPONSE": "110", "API_ADVICE": "Required field", "REF_FIELD": "CUST_EMAIL" },
+      "expect": { "throws": "ValidationError", "error.refField": "CUST_EMAIL" }
+    },
+    {
+      "name": "timeout/unknown-state-carries-key",
+      "description": "A timeout means UNKNOWN state and must carry the idempotency key for status() recovery.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "3.00", "currency": "USD" } }],
+        "idempotency": { "xtlOrderId": "ORD-TIMEOUT-1" }
+      },
+      "simulate": "timeout",
+      "expect": { "throws": "TimeoutError", "error.xtlOrderId": "ORD-TIMEOUT-1" }
+    },
+    {
+      "name": "status/net-position-multi-leg",
+      "description": "Order-level aggregation: auth 100, capture 60, refund 10 -> net 50, outstanding 40.",
+      "request": { "operation": "status", "orderRef": "PO-2000" },
+      "response": {
+        "PO_ID": "PO-2000",
+        "CURR_CODE_ALPHA": "USD",
+        "API_RESPONSE": "0",
+        "REQUEST_ACTION_1": "CCAUTHORIZE",
+        "TRANS_STATUS_NAME_1": "APPROVED",
+        "TRANS_VALUE_1": "100.00",
+        "TRANS_ID_1": "T-1",
+        "REQUEST_ACTION_2": "CCCAPTURE",
+        "TRANS_STATUS_NAME_2": "APPROVED",
+        "TRANS_VALUE_2": "60.00",
+        "TRANS_ID_2": "T-2",
+        "REQUEST_ACTION_3": "CCCREDIT",
+        "TRANS_STATUS_NAME_3": "APPROVED",
+        "TRANS_VALUE_3": "10.00",
+        "TRANS_ID_3": "T-3"
+      },
+      "expect": {
+        "transactions.length": 3,
+        "authorized.amount": "100.00",
+        "captured.amount": "60.00",
+        "refunded.amount": "10.00",
+        "net.amount": "50.00",
+        "outstanding.amount": "40.00"
+      }
+    },
+    {
+      "name": "money/rejects-float",
+      "description": "Money must refuse binary floats — decimal amounts only.",
+      "request": { "operation": "constructMoney", "amount": 1.25, "currency": "USD" },
+      "expect": { "throws": "TypeError" }
+    },
+    {
+      "name": "unknown-status/does-not-read-as-approved",
+      "description": "An unrecognized TRANS_STATUS_NAME must never fall through to APPROVED.",
+      "request": {
+        "operation": "sale",
+        "paymentMethod": { "kind": "card", "number": "4111111111111111", "expiry": "122030" },
+        "lineItems": [{ "productId": "SKU-1", "count": 1, "value": { "amount": "1.00", "currency": "USD" } }]
+      },
+      "response": {
+        "REQUEST_ACTION": "CCAUTHCAP",
+        "TRANS_STATUS_NAME": "WAT",
+        "PO_ID": "PO-1013",
+        "API_RESPONSE": "0",
+        "SERVICE_RESPONSE": "100"
+      },
+      "expect": { "statusNot": "APPROVED" }
+    }
+  ]
+}
