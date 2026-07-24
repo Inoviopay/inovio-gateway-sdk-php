@@ -1,3 +1,5 @@
+> _Maintainer note — internal build detail. Nothing here is needed to **use** the SDK; see the top-level README for that._
+
 # Vendored spec artifacts
 
 These files are **vendored copies**, not the editable source. This repo is
@@ -7,7 +9,7 @@ regenerate — no sibling checkout, submodule or network fetch required.
 | File | What it is |
 |------|-----------|
 | `spec-enums.json` | 196 enum values extracted from the Inovio Gateway Payments Service API v4.14 PDF (Appendices A–F) |
-| `conformance-fixtures.json` | The cross-language conformance corpus every Inovio SDK must pass identically |
+| `conformance-fixtures.json` | Conformance fixtures used to test this SDK |
 
 ## Upstream
 

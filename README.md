@@ -1,13 +1,10 @@
 # Inovio Gateway SDK — PHP
 
-Port of the Node/TS reference (**W2** of the internal SDK plan). Structurally
-identical to the other SDKs; only ergonomics differ.
+The Inovio payment gateway for PHP 8+. Card transactions — authorize, capture,
+refund, tokenize. Designed to drop into a WooCommerce, Magento, or custom cart:
+bring your own HTTP client, no Composer dependencies.
 
-> **Status: alpha, local only.** Not published to Packagist.
-
-This is the **long-tail e-commerce SDK** — the one a
-WooCommerce or Magento plugin would embed — so ergonomics and host-friendliness
-matter more here than anywhere else.
+> **Status: alpha.** Not yet published to Packagist.
 
 ## Requirements
 
@@ -66,7 +63,7 @@ attached.
 
 ## Five things that will surprise you
 
-Identical semantics to the Node reference — see the Node reference SDK's README for the full rationale:
+The behaviours below are worth internalizing before you integrate:
 
 1. **A decline is not an exception.** `sale()` returns `status === 'DECLINED'`.
    Exceptions mean you never got a payment answer.
@@ -78,12 +75,23 @@ Identical semantics to the Node reference — see the Node reference SDK's READM
 5. **`Money::of(1.25, 'USD')` throws.** Pass `'1.25'` — floats cannot represent
    decimal amounts exactly.
 
-## Enums are generated
+## Classifier fields are our interpretation, not the spec
 
-`src/Enums/Generated.php` comes from `spec/spec-enums.json` (decision **D1**).
-Do not edit. The `retryable`/`terminal`/`stopRecurring` and AVS/CVV
-classifications are **derived, not from the spec** — see
-[`spec/README.md`](spec/README.md).
+Some fields the SDK gives you are **derived by us from the response codes, not
+returned by the gateway** — and you will branch real logic on them, so it is
+worth knowing which:
+
+- **`serviceClassification->retryable` / `terminal` / `stopRecurring`** — your
+  dunning logic decides whether to re-try a declined charge based on these. We
+  set them from the service response code; the gateway does not send them.
+- **`avs->classification`** — `positive` / `partial` / `negative` / `neutral`.
+  `partial` means some elements matched and some did not (e.g. street matches
+  but postal code does not). **Whether a partial AVS result is acceptable is
+  your risk decision** — the SDK reports the classification and deliberately
+  does not accept or reject for you.
+
+If you need the raw gateway value instead of our label, every result carries a
+`raw` array with the verbatim response fields.
 
 ## Tokenization (spec §4.8)
 
@@ -99,14 +107,14 @@ Two things the SDK handles that the spec will mislead you on:
 
 **1. The signed message excludes the PAN.** The v4.14 PDF's §4.8.1.2 note says
 the HMAC covers `card_pan`, and its worked example agrees — but the gateway
-does not. `CRPT.TOKEN_PKG` validates:
+does not. The gateway actually validates:
 
 ```
 hmac_sha256(timestamp || unique_id || site_id, site_key)
 ```
 
-Signing with the PAN included fails with error 121. This SDK follows the
-gateway, verified against live T1.
+Signing with the card number included fails with error 121. This SDK signs
+the way the gateway expects.
 
 **2. A token replaces the PAN only.** The transaction still needs the expiry
 (and CVV where the processor asks), so `tokenize()` carries them forward onto
@@ -117,32 +125,6 @@ BIN metadata (`brand`, `bank`, `country`, ...) is best-effort: the service
 returns those keys **empty** when the BIN is not in its lookup table, and the
 SDK normalizes blanks to null/undefined so you can test for presence.
 
-⚠️ This is a **server-side** call — the PAN passes through your the card number passes through your server. The browser Hosted Fields client keeps it in the cardholder's browser
-client, which is not built yet.
-
-## Vendored spec artifacts
-
-This repo **stands alone**: `spec/spec-enums.json` and
-`spec/conformance-fixtures.json` are committed copies, so a fresh clone builds,
-tests and regenerates with no sibling checkout, submodule or network fetch.
-
-They are not the editable source — they are produced upstream in the internal
-`inoviov2` workspace (`api-sdk/spec/`), where the extraction pipeline and its
-validator live. To pull an upstream change in:
-
-```bash
-./scripts/sync-spec.sh /path/to/inoviov2/api-sdk/spec
-```
-
-Then regenerate the enums, run the suite, and commit the spec change together
-with the generated code it produces.
-
-**This is a coordinated change.** The other Inovio SDK repos vendor the same two
-files; if they are not synced in step, the SDKs silently stop agreeing — which
-is exactly what the shared conformance corpus exists to prevent.
-
-## Conformance
-
-`tests/conformance.php` runs the shared corpus in
-`spec/conformance-fixtures.json` — the same fixtures every language SDK must
-pass identically.
+⚠️ `tokenize()` runs on your server, so the card number passes through it. To
+keep the number in the cardholder's browser instead, use the browser Hosted
+Fields client (not yet available).
