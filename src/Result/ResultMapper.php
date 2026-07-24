@@ -40,20 +40,20 @@ final class ResultMapper
         }
 
         $amount = null;
-        if (isset($r['TRANS_VALUE'], $r['CURR_CODE_ALPHA'])) {
-            $amount = Money::of($r['TRANS_VALUE'], $r['CURR_CODE_ALPHA']);
+        if (self::val($r, 'TRANS_VALUE') !== null && self::val($r, 'CURR_CODE_ALPHA') !== null) {
+            $amount = Money::of(self::val($r, 'TRANS_VALUE'), self::val($r, 'CURR_CODE_ALPHA'));
         }
 
         // Conversion is reported ONLY on real FX — otherwise the "settled"
         // fields are just the auth amount echoed back and would mean nothing.
         $conversion = null;
-        $rate = $r['TRANS_EXCH_RATE'] ?? null;
+        $rate = self::val($r, 'TRANS_EXCH_RATE');
         if (
             $rate !== null && $rate !== '' && (float) $rate != 0.0
-            && isset($r['TRANS_VALUE_SETTLED'], $r['CURR_CODE_ALPHA_SETTLED'])
+            && self::val($r, 'TRANS_VALUE_SETTLED') !== null && self::val($r, 'CURR_CODE_ALPHA_SETTLED') !== null
         ) {
             $conversion = new Conversion(
-                Money::of($r['TRANS_VALUE_SETTLED'], $r['CURR_CODE_ALPHA_SETTLED']),
+                Money::of(self::val($r, 'TRANS_VALUE_SETTLED'), self::val($r, 'CURR_CODE_ALPHA_SETTLED')),
                 $rate
             );
         }
@@ -76,16 +76,16 @@ final class ResultMapper
             settled: self::flag($r['TRANS_SETTLED'] ?? null),
             raw: $r,
             lineItemRefs: $liRefs,
-            orderRef: isset($r['PO_ID']) ? Refs::order($r['PO_ID']) : null,
-            xtlOrderRef: isset($r['XTL_ORDER_ID']) ? Refs::xtlOrder($r['XTL_ORDER_ID']) : null,
-            transactionId: isset($r['TRANS_ID']) ? Refs::transaction($r['TRANS_ID']) : null,
-            requestId: isset($r['REQ_ID']) ? Refs::req($r['REQ_ID']) : null,
-            batchId: isset($r['BATCH_ID']) ? Refs::batch($r['BATCH_ID']) : null,
-            customerRef: (isset($r['CUST_ID']) || isset($r['XTL_CUST_ID']))
+            orderRef: self::val($r, 'PO_ID') !== null ? Refs::order(self::val($r, 'PO_ID')) : null,
+            xtlOrderRef: self::val($r, 'XTL_ORDER_ID') !== null ? Refs::xtlOrder(self::val($r, 'XTL_ORDER_ID')) : null,
+            transactionId: self::val($r, 'TRANS_ID') !== null ? Refs::transaction(self::val($r, 'TRANS_ID')) : null,
+            requestId: self::val($r, 'REQ_ID') !== null ? Refs::req(self::val($r, 'REQ_ID')) : null,
+            batchId: self::val($r, 'BATCH_ID') !== null ? Refs::batch(self::val($r, 'BATCH_ID')) : null,
+            customerRef: (self::val($r, 'CUST_ID') !== null || self::val($r, 'XTL_CUST_ID') !== null)
                 ? Refs::customer($r['CUST_ID'] ?? null, $r['XTL_CUST_ID'] ?? null) : null,
-            savedCardRef: (isset($r['PMT_ID']) || isset($r['PMT_ID_XTL']))
+            savedCardRef: (self::val($r, 'PMT_ID') !== null || self::val($r, 'PMT_ID_XTL') !== null)
                 ? Refs::savedCard($r['PMT_ID'] ?? null, $r['PMT_ID_XTL'] ?? null) : null,
-            membershipRef: (isset($r['MBSHP_ID']) || isset($r['MBSHP_ID_XTL']))
+            membershipRef: (self::val($r, 'MBSHP_ID') !== null || self::val($r, 'MBSHP_ID_XTL') !== null)
                 ? Refs::membership($r['MBSHP_ID'] ?? null, $r['MBSHP_ID_XTL'] ?? null) : null,
             amount: $amount,
             conversion: $conversion,
@@ -155,7 +155,7 @@ final class ResultMapper
             transactions: $legs,
             settled: $settled,
             raw: $r,
-            xtlRef: isset($r['XTL_ORDER_ID']) ? Refs::xtlOrder($r['XTL_ORDER_ID']) : null,
+            xtlRef: self::val($r, 'XTL_ORDER_ID') !== null ? Refs::xtlOrder(self::val($r, 'XTL_ORDER_ID')) : null,
             authorized: Money::of($fmt($auth), $currency),
             captured: Money::of($fmt($cap), $currency),
             refunded: Money::of($fmt($ref), $currency),
@@ -171,6 +171,24 @@ final class ResultMapper
         return isset(Generated::TRANSACTION_STATUSES[$s]) ? $s : 'FAILED';
     }
 
+    /**
+     * A field counts as present only when it is non-null AND non-empty.
+     *
+     * The gateway returns inapplicable fields as EMPTY STRINGS rather than
+     * omitting them — a TESTGW response, for example, carries TRANS_ID="".
+     * isset() treats those as present and hands "" to a reference constructor,
+     * which rejects it. Verified against the live T1 gateway; the mocked
+     * fixtures never exercised it because they omit the keys entirely.
+     *
+     * @param array<string,string> $r
+     */
+    private static function val(array $r, string $key): ?string
+    {
+        $v = $r[$key] ?? null;
+
+        return ($v === null || $v === '') ? null : $v;
+    }
+
     private static function num(?string $v): ?int
     {
         return ($v === null || $v === '') ? null : (int) $v;
@@ -184,8 +202,9 @@ final class ResultMapper
     /** @param array<string,string> $r */
     private static function card(array $r): ?CardInfo
     {
-        $has = isset($r['CARD_BRAND_NAME']) || isset($r['PMT_L4']) || isset($r['CARD_TYPE'])
-            || isset($r['CARD_BANK']) || isset($r['CARD_COUNTRY']);
+        $has = self::val($r, 'CARD_BRAND_NAME') !== null || self::val($r, 'PMT_L4') !== null
+            || self::val($r, 'CARD_TYPE') !== null || self::val($r, 'CARD_BANK') !== null
+            || self::val($r, 'CARD_COUNTRY') !== null;
         if (!$has) {
             return null;
         }
@@ -200,7 +219,7 @@ final class ResultMapper
         $c->balance = $r['CARD_BALANCE'] ?? null;
         $c->last4 = $r['PMT_L4'] ?? null;
         $c->networkTokenUsed = self::num($r['TRANS_NTOKEN_USED'] ?? null);
-        if (isset($r['PMT_AAU_UPDATE_DESC']) || isset($r['PMT_AAU_UPDATE_DATE'])) {
+        if (self::val($r, 'PMT_AAU_UPDATE_DESC') !== null || self::val($r, 'PMT_AAU_UPDATE_DATE') !== null) {
             $c->accountUpdater = new AccountUpdater(
                 $r['PMT_AAU_UPDATE_DESC'] ?? null,
                 $r['PMT_AAU_UPDATE_DATE'] ?? null,
@@ -218,7 +237,7 @@ final class ResultMapper
         if ($status !== 'PENDING') {
             return null;
         }
-        if (isset($r['P3DS_PROCTRANSID']) || isset($r['PAREQ']) || isset($r['P3DS_JWT'])) {
+        if (self::val($r, 'P3DS_PROCTRANSID') !== null || self::val($r, 'PAREQ') !== null || self::val($r, 'P3DS_JWT') !== null) {
             $n = new NextAction('threeDSChallenge');
             $n->redirectUrl = $r['PROC_REDIRECT_URL'] ?? null;
             $n->jwt = $r['P3DS_JWT'] ?? null;
@@ -227,21 +246,21 @@ final class ResultMapper
 
             return $n;
         }
-        if (isset($r['PROC_BARCODE'])) {
+        if (self::val($r, 'PROC_BARCODE') !== null) {
             $n = new NextAction('displayVoucher');
             $n->url = $r['PROC_REDIRECT_URL'] ?? null;
             $n->barcode = $r['PROC_BARCODE'];
 
             return $n;
         }
-        if (isset($r['PIX_TOKEN'])) {
+        if (self::val($r, 'PIX_TOKEN') !== null) {
             $n = new NextAction('displayQr');
             $n->url = $r['PROC_REDIRECT_URL'] ?? null;
             $n->token = $r['PIX_TOKEN'];
 
             return $n;
         }
-        if (isset($r['PROC_REDIRECT_URL'])) {
+        if (self::val($r, 'PROC_REDIRECT_URL') !== null) {
             $n = new NextAction('redirect');
             $n->url = $r['PROC_REDIRECT_URL'];
 

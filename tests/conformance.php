@@ -353,6 +353,32 @@ check($t, 'AVS A partial', \Inovio\Gateway\Enums\Generated::AVS_CODES['A']['clas
 check($t, 'AVS N negative', \Inovio\Gateway\Enums\Generated::AVS_CODES['N']['classification'], 'negative');
 check($t, 'AVS X positive', \Inovio\Gateway\Enums\Generated::AVS_CODES['X']['classification'], 'positive');
 
+// ------------------------------------- empty-string fields (live-gateway bug)
+$t = 'empty-string-fields/treated-as-absent';
+// The gateway returns inapplicable fields as EMPTY STRINGS rather than omitting
+// them (verified against live T1 on TESTGW/TESTAUTH). isset() treats those as
+// present and hands "" to a reference constructor, which throws.
+$http = new MockHttp([
+    'REQUEST_ACTION' => 'CCAUTHCAP', 'TRANS_STATUS_NAME' => 'APPROVED',
+    'TRANS_VALUE' => '1.00', 'CURR_CODE_ALPHA' => 'USD', 'PO_ID' => 'PO-EMPTY',
+    'TRANS_ID' => '', 'CUST_ID' => '', 'XTL_CUST_ID' => '', 'PMT_ID' => '',
+    'BATCH_ID' => '', 'MERCH_ACCT_ID' => '', 'CARD_BRAND_NAME' => '',
+    'PMT_L4' => '', 'AVS_RESPONSE' => '',
+    'API_RESPONSE' => '0', 'SERVICE_RESPONSE' => '100',
+]);
+$threw = null;
+try { $r = client($http)->sale(basicRequest()); } catch (Throwable $e) { $threw = $e; }
+check($t, 'must not throw on empty fields', $threw === null, true);
+if ($threw === null) {
+    check($t, 'status', $r->status, 'APPROVED');
+    check($t, 'orderRef still parsed', $r->orderRef->poId(), 'PO-EMPTY');
+    check($t, 'empty TRANS_ID -> null', $r->transactionId, null);
+    check($t, 'empty CUST_ID -> null', $r->customerRef, null);
+    check($t, 'empty PMT_ID -> null', $r->savedCardRef, null);
+    check($t, 'empty BATCH_ID -> null', $r->batchId, null);
+    check($t, 'all-empty card -> null', $r->card, null);
+}
+
 // ------------------------------------------------------------------ report
 echo "\n";
 foreach ($failures as $f) {
