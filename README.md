@@ -128,3 +128,47 @@ SDK normalizes blanks to null/undefined so you can test for presence.
 ⚠️ `tokenize()` runs on your server, so the card number passes through it. To
 keep the number in the cardholder's browser instead, use the browser Hosted
 Fields client (not yet available).
+
+## 3D Secure (spec §15)
+
+The SDK owns every server leg; your page owns two iframes (a hidden one for
+device-data collection, a visible one for the challenge):
+
+```php
+use Inovio\Gateway\ThreeDSPrepare;
+use Inovio\Gateway\Model\{BrowserData, ThreeDS, ThreeDSChallengeResult};
+
+// 1. Start the session — returns what the DDC iframe needs.
+$ddc = $client->threeDSecure()->prepare(
+    ThreeDSPrepare::card($card, 'USD', 'US')
+);
+// Browser: POST $ddc->jwt (field name JWT) to $ddc->ddcUrl in a hidden iframe.
+
+// 2. Enrollment leg — a normal sale/authorize carrying the ThreeDS block.
+//    BrowserData is REQUIRED: without it the gateway silently skips 3DS.
+$req->browser = new BrowserData($lang, $userAgent, $acceptHeader,
+    javaEnabled: false, colorDepth: 24, screenHeight: 1080, screenWidth: 1920,
+    timeZoneOffsetMinutes: 480);
+$req->threeDS = new ThreeDS($ddc->ddcReferenceId, 'https://you.example/3ds-return');
+$r = $client->sale($req);
+
+match ($r->status) {
+    'APPROVED', 'DECLINED' => /* frictionless — done, check $r->threeDS->eci */,
+    'PENDING' => /* challenge: POST $r->nextAction->jwt to
+                    $r->nextAction->redirectUrl in a visible iframe */,
+};
+
+// 3. The ACS POSTs TRANSACTIONID / RESPONSE / MD to your return URL.
+//    RESPONSE may be EMPTY — that is not an error; pass it through as ''.
+$final = $client->threeDSecure()->completeSale(
+    $req,
+    new ThreeDSChallengeResult($_POST['TransactionId'], $_POST['Response'] ?? '')
+);
+// $final->threeDS?->eci — 05/06 means fully authenticated (liability shift).
+```
+
+Vaulted cards use `ThreeDSPrepare::savedCard(...)` (the gateway looks up the
+BIN); browser-tokenized cards use `ThreeDSPrepare::bin(...)` with the BIN
+captured client-side. Partners running their own 3DS provider skip all of the
+above and attach `$req->threeDSResult = new ThreeDSResult($cavv, $eci, $transId)`
+to a normal one-leg `sale()`.

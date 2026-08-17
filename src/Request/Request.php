@@ -21,6 +21,9 @@ use Inovio\Gateway\Model\PaymentMethods;
 use Inovio\Gateway\Model\Recurring;
 use Inovio\Gateway\Model\RiskOptions;
 use Inovio\Gateway\Model\SavedCard;
+use Inovio\Gateway\Model\ThreeDS;
+use Inovio\Gateway\Model\ThreeDSChallengeResult;
+use Inovio\Gateway\Model\ThreeDSResult;
 use Inovio\Gateway\Model\Token;
 
 /** A card transaction request (object model §3.3). */
@@ -40,6 +43,12 @@ final class TransactionRequest
     public ?Metadata $metadata = null;
     public ?string $merchAcctId = null;
     public ?BrowserData $browser = null;
+    /** 3DS enrollment leg (requires $browser). Mutually exclusive with the other 3DS blocks. */
+    public ?ThreeDS $threeDS = null;
+    /** 3DS challenge completion leg — normally set via ThreeDSecureClient::completeSale(). */
+    public ?ThreeDSChallengeResult $threeDSChallenge = null;
+    /** Externally-obtained 3DS authentication attached to a one-leg transaction. */
+    public ?ThreeDSResult $threeDSResult = null;
     /** CCCREDIT + FORCE_CREDIT — a credit with no referenced original. */
     public bool $forceCredit = false;
 
@@ -246,9 +255,66 @@ final class RequestBuilder
         }
 
         if ($req->browser !== null) {
-            self::put($p, 'P3DS_BROWSER_LANGUAGE', $req->browser->language);
-            self::put($p, 'USER_AGENT_XTL', $req->browser->userAgent);
-            self::put($p, 'P3DS_BROWSER_HEADER', $req->browser->header);
+            $b = $req->browser;
+            self::put($p, 'P3DS_BROWSER_LANGUAGE', $b->language);
+            self::put($p, 'USER_AGENT_XTL', $b->userAgent);
+            self::put($p, 'P3DS_BROWSER_HEADER', $b->header);
+            if ($b->javaEnabled !== null) {
+                $p['P3DS_JAVA_ENABLED'] = $b->javaEnabled ? 'TRUE' : 'FALSE';
+            }
+            if ($b->javascriptEnabled !== null) {
+                $p['P3DS_JAVASCRIPT_ENABLED'] = $b->javascriptEnabled ? 'TRUE' : 'FALSE';
+            }
+            if ($b->colorDepth !== null) {
+                self::put($p, 'P3DS_BROWSER_COLOR_DEPTH', (string) $b->colorDepth);
+            }
+            if ($b->screenHeight !== null) {
+                self::put($p, 'P3DS_SCREEN_HEIGHT', (string) $b->screenHeight);
+            }
+            if ($b->screenWidth !== null) {
+                self::put($p, 'P3DS_SCREEN_WIDTH', (string) $b->screenWidth);
+            }
+            if ($b->timeZoneOffsetMinutes !== null) {
+                self::put($p, 'P3DS_BROWSER_TIME_ZONE', (string) abs($b->timeZoneOffsetMinutes));
+            }
+            self::put($p, 'P3DS_CHALLENGE_WINDOW', $b->challengeWindow);
+            self::put($p, 'P3DS_IP_ADDRESS', $b->ipAddress);
+        }
+
+        $threeDsBlocks = ($req->threeDS !== null ? 1 : 0)
+            + ($req->threeDSChallenge !== null ? 1 : 0)
+            + ($req->threeDSResult !== null ? 1 : 0);
+        if ($threeDsBlocks > 1) {
+            throw new ValidationException(
+                'threeDS, threeDSChallenge and threeDSResult are distinct legs — set at most one'
+            );
+        }
+        if ($req->threeDS !== null) {
+            if ($req->browser === null) {
+                throw new ValidationException(
+                    '3DS enrollment requires browser data — the gateway silently skips 3DS '
+                    . 'without P3DS_BROWSER_LANGUAGE / USER_AGENT_XTL / P3DS_BROWSER_HEADER',
+                    null,
+                    'P3DS_BROWSER_LANGUAGE'
+                );
+            }
+            self::put($p, 'REQUEST_ENROLLMENT', '1');
+            self::put($p, 'DDC_REFERENCEID', $req->threeDS->ddcReferenceId);
+            self::put($p, 'P3DS_RETURN_URL', $req->threeDS->returnUrl);
+            self::put($p, 'P3DS_VERSION', $req->threeDS->version);
+        }
+        if ($req->threeDSChallenge !== null) {
+            self::put($p, 'P3DS_PROCTRANSID', $req->threeDSChallenge->procTransId);
+            // The ACS may return an empty RESPONSE; the spec requires sending
+            // REQUEST_PARES as the empty value, so bypass put()'s blank filter.
+            $p['REQUEST_PARES'] = $req->threeDSChallenge->pares;
+        }
+        if ($req->threeDSResult !== null) {
+            self::put($p, 'P3DS_CAVV', $req->threeDSResult->cavv);
+            self::put($p, 'P3DS_ECI', $req->threeDSResult->eci);
+            self::put($p, 'P3DS_TRANSID', $req->threeDSResult->transId);
+            self::put($p, 'P3DS_VERSION', $req->threeDSResult->version);
+            self::put($p, 'P3DS_XID', $req->threeDSResult->xid);
         }
 
         self::put($p, 'MERCH_ACCT_ID', $req->merchAcctId);

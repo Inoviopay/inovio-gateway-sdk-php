@@ -55,9 +55,11 @@ final class InovioClient
 
     private string $endpoint;
     private string $tokenEndpoint;
+    private string $threeDsEndpoint;
     private string $apiVersion;
     private int $timeoutMs;
     private HttpClient $http;
+    private ?ThreeDSecureClient $threeDSecure = null;
 
     public function __construct(
         private Credentials $credentials,
@@ -68,7 +70,8 @@ final class InovioClient
         int $timeoutMs = self::DEFAULT_TIMEOUT_MS,
         ?string $tokenEndpoint = null,
         /** Per-site HMAC secret for the token service (§4.8); tokenize() only. */
-        private ?string $siteKey = null
+        private ?string $siteKey = null,
+        ?string $threeDsEndpoint = null
     ) {
         $this->endpoint = $endpoint
             ?? ($environment === 'PRODUCTION'
@@ -76,6 +79,8 @@ final class InovioClient
                 : Transport::SANDBOX_ENDPOINT);
         $this->tokenEndpoint = $tokenEndpoint
             ?? (string) preg_replace('/pmt_service\.cfm$/', 'token_service.cfm', $this->endpoint);
+        $this->threeDsEndpoint = $threeDsEndpoint
+            ?? (string) preg_replace('/pmt_service\.cfm$/', '3dsrequest.cfm', $this->endpoint);
         $this->apiVersion = $apiVersion ?? Generated::SPEC_API_VERSION;
         $this->timeoutMs = $timeoutMs;
         $this->http = $httpClient ?? new CurlHttpClient();
@@ -227,6 +232,22 @@ final class InovioClient
         );
     }
 
+    /**
+     * The 3DS server legs (object model §6): prepare() -> DDC ->
+     * sale/authorize with a ThreeDS block -> completeSale()/completeAuthorize().
+     */
+    public function threeDSecure(): ThreeDSecureClient
+    {
+        return $this->threeDSecure ??= new ThreeDSecureClient(
+            $this->credentials,
+            $this->threeDsEndpoint,
+            $this->http,
+            $this->timeoutMs,
+            $this->apiVersion,
+            $this
+        );
+    }
+
     /** TESTAUTH — verify credentials. */
     public function testAuth(): HealthResult
     {
@@ -280,7 +301,7 @@ final class InovioClient
      *
      * @param array<string,string> $r
      */
-    private function raiseIfApiError(array $r): void
+    public static function raiseIfApiError(array $r): void
     {
         $code = $r['API_RESPONSE'] ?? null;
         if ($code === null || $code === '' || !is_numeric($code)) {
@@ -316,7 +337,7 @@ final class InovioClient
     {
         $merged = array_merge($this->authParams($action), $params);
         $raw = Transport::send($this->endpoint, $this->http, $this->timeoutMs, $merged, $idempotencyKey);
-        $this->raiseIfApiError($raw);
+        self::raiseIfApiError($raw);
 
         return $raw;
     }

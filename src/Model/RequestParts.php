@@ -152,13 +152,82 @@ final class Metadata
     public ?string $procUdf2 = null;
 }
 
-/** 3DS — the gateway silently disables 3DS if any of these is missing. */
+/**
+ * 3DS browser/device data. The gateway silently disables 3DS if language,
+ * userAgent or header is missing — hence they are required here. The rest are
+ * the optional EMVCo device fields (spec §15.1, IOTP-1685).
+ */
 final class BrowserData
 {
     public function __construct(
         public string $language,
         public string $userAgent,
-        public string $header
+        public string $header,
+        /** Browser can execute Java — wire TRUE/FALSE. */
+        public ?bool $javaEnabled = null,
+        /** Browser can execute JavaScript — wire TRUE/FALSE. */
+        public ?bool $javascriptEnabled = null,
+        /** Bits per pixel: 1, 4, 8, 15, 16, 24, 32 or 48. */
+        public ?int $colorDepth = null,
+        public ?int $screenHeight = null,
+        public ?int $screenWidth = null,
+        /** Minutes between UTC and browser local time; positive regardless of direction. */
+        public ?int $timeZoneOffsetMinutes = null,
+        /** ACS challenge window size override code. */
+        public ?string $challengeWindow = null,
+        public ?string $ipAddress = null
+    ) {
+    }
+}
+
+/**
+ * 3DS enrollment leg (CMPI lookup) — attach to sale/authorize AFTER the DDC
+ * iframe has run against DdcReference->ddcUrl.
+ *
+ * Requires TransactionRequest->browser to be set; the builder rejects the
+ * request otherwise, because the gateway silently skips 3DS without it.
+ */
+final class ThreeDS
+{
+    public function __construct(
+        /** From ThreeDSecureClient::prepare(). */
+        public string $ddcReferenceId,
+        /** Where the ACS POSTs TRANSACTIONID/RESPONSE/MD after the challenge. */
+        public string $returnUrl,
+        public string $version = '2'
+    ) {
+    }
+}
+
+/**
+ * 3DS challenge completion — what the ACS POSTed back to the return URL.
+ *
+ * RESPONSE may legitimately be empty; the spec requires passing it through as
+ * the empty value, so $pares is a plain string, not nullable.
+ */
+final class ThreeDSChallengeResult
+{
+    public function __construct(
+        /** TRANSACTIONID from the ACS return POST (P3DS_PROCTRANSID). */
+        public string $procTransId,
+        /** RESPONSE from the ACS return POST (REQUEST_PARES) — may be ''. */
+        public string $pares = ''
+    ) {
+    }
+}
+
+/**
+ * Externally-obtained 3DS authentication — for partners running their own 3DS
+ * provider. Attaches to a normal sale/authorize; one leg, no redirect.
+ */
+final class ThreeDSResult
+{
+    public function __construct(
+        public string $cavv,
+        public string $eci,
+        public string $transId,
+        public string $version = '2',
+        public ?string $xid = null
     ) {
     }
 }

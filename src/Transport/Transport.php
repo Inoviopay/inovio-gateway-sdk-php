@@ -32,6 +32,13 @@ final class Transport
     }
 
     /**
+     * Fields that must be transmitted even when empty. The ACS may hand back an
+     * empty RESPONSE after a 3DS challenge, and the spec (§15.1.4) requires it
+     * be passed through as the empty value for REQUEST_PARES.
+     */
+    private const SEND_WHEN_EMPTY = ['REQUEST_PARES' => true];
+
+    /**
      * Spec §2.2: URL-encoded form body.
      *
      * @param array<string,string> $params
@@ -40,7 +47,7 @@ final class Transport
     {
         $filtered = [];
         foreach ($params as $k => $v) {
-            if ($v !== null && $v !== '') {
+            if ($v !== null && ($v !== '' || isset(self::SEND_WHEN_EMPTY[$k]))) {
                 $filtered[$k] = $v;
             }
         }

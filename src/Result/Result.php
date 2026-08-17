@@ -131,6 +131,24 @@ final class NextAction
 }
 
 /**
+ * 3DS authentication attached to a completed transaction. eci 05/06 (Visa) is
+ * full authentication — the liability-shift signal partners branch on.
+ */
+final class ThreeDSAuth
+{
+    public function __construct(
+        public ?string $eci = null,
+        public ?string $cavv = null,
+        public ?string $transId = null,
+        /** e.g. "Frictionless Authentication" */
+        public ?string $response = null,
+        public ?string $vendor = null,
+        public ?string $version = null
+    ) {
+    }
+}
+
+/**
  * The result of a single gateway call (object model §3.5).
  *
  * Two deliberate shapes, both load-bearing:
@@ -176,7 +194,8 @@ final class TransactionResult
         public ?AvsResult $avs = null,
         public ?CvvResult $cvv = null,
         public ?CardInfo $card = null,
-        public ?NextAction $nextAction = null
+        public ?NextAction $nextAction = null,
+        public ?ThreeDSAuth $threeDS = null
     ) {
     }
 }

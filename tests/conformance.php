@@ -410,6 +410,140 @@ if ($threw === null) {
     check($t, 'all-empty card -> null', $r->card, null);
 }
 
+// ------------------------------------------------------------------ 3DS
+// Wire contract verified against the deployed 3dsrequest.cfm + THREEDS_PKG
+// source and the Inoviopay/3ds-tool-demo reference implementation.
+
+$t = '3ds/prepare';
+$http = new MockHttp([
+    'REQ_ID' => 'R-3001', 'JWT' => 'jwt-abc',
+    'DDC_URL' => 'https://centinelapistag.cardinalcommerce.com/V2/Cruise/Collect',
+    'DDC_REFERENCEID' => 'R-3001-148', 'PMT_BIN' => '400000', 'MERCH_ACCT_ID' => '148',
+]);
+$ddc = client($http)->threeDSecure()->prepare(
+    \Inovio\Gateway\ThreeDSPrepare::card(
+        PaymentMethods::card('4000000000002503', '122028', '123'),
+        'USD',
+        'US'
+    )
+);
+check($t, 'jwt', $ddc->jwt, 'jwt-abc');
+check($t, 'ddcUrl', $ddc->ddcUrl, 'https://centinelapistag.cardinalcommerce.com/V2/Cruise/Collect');
+check($t, 'ddcReferenceId', $ddc->ddcReferenceId, 'R-3001-148');
+check($t, 'pmtBin', $ddc->pmtBin, '400000');
+check($t, 'merchAcctId', $ddc->merchAcctId, '148');
+check($t, 'wire: PAN sent', $http->lastParams['PMT_NUMB'], '4000000000002503');
+check($t, 'wire: currency', $http->lastParams['REQUEST_CURRENCY'], 'USD');
+check($t, 'wire: country', $http->lastParams['BILL_ADDR_COUNTRY'], 'US');
+// The CFM derives 3DSINVOKEDDC from the auth path; sending an action would be wrong.
+check($t, 'wire: no REQUEST_ACTION', array_key_exists('REQUEST_ACTION', $http->lastParams), false);
+
+$t = '3ds/prepare-error';
+$http = new MockHttp(['REQ_ID' => 'R-3002', 'API_RESPONSE' => '113', 'API_ADVICE' => 'Invalid PMT_ID']);
+$threw = null;
+try {
+    client($http)->threeDSecure()->prepare(\Inovio\Gateway\ThreeDSPrepare::bin('400000', 'USD', 'US'));
+} catch (Throwable $e) {
+    $threw = $e;
+}
+check($t, 'API 113 -> ValidationException', $threw instanceof ValidationException, true);
+
+$t = '3ds/enrollment-challenge';
+$http = new MockHttp([
+    'REQUEST_ACTION' => 'CCAUTHCAP', 'TRANS_STATUS_NAME' => 'PENDING',
+    'REQ_ID' => 'R-3003', 'API_RESPONSE' => '0', 'SERVICE_RESPONSE' => '820',
+    'PROC_REDIRECT_URL' => 'https://centinelapistag.cardinalcommerce.com/V2/Cruise/StepUp',
+    'P3DS_JWT' => 'challenge-jwt', 'P3DS_PROCTRANSID' => '3DS-77',
+]);
+$req = basicRequest();
+$req->browser = new \Inovio\Gateway\Model\BrowserData(
+    'en-US',
+    'Mozilla/5.0',
+    'text/html,application/xhtml+xml',
+    javaEnabled: false,
+    colorDepth: 24,
+    screenHeight: 1080,
+    screenWidth: 1920,
+    timeZoneOffsetMinutes: 480
+);
+$req->threeDS = new \Inovio\Gateway\Model\ThreeDS('R-3001-148', 'https://merchant.example/3ds-return');
+$r = client($http)->sale($req);
+check($t, 'status', $r->status, 'PENDING');
+check($t, 'nextAction kind', $r->nextAction?->kind, 'threeDSChallenge');
+check($t, 'nextAction redirectUrl', $r->nextAction?->redirectUrl, 'https://centinelapistag.cardinalcommerce.com/V2/Cruise/StepUp');
+check($t, 'nextAction jwt', $r->nextAction?->jwt, 'challenge-jwt');
+check($t, 'nextAction procTransId', $r->nextAction?->procTransId, '3DS-77');
+check($t, 'wire: REQUEST_ENROLLMENT', $http->lastParams['REQUEST_ENROLLMENT'], '1');
+check($t, 'wire: DDC_REFERENCEID', $http->lastParams['DDC_REFERENCEID'], 'R-3001-148');
+check($t, 'wire: P3DS_RETURN_URL', $http->lastParams['P3DS_RETURN_URL'], 'https://merchant.example/3ds-return');
+check($t, 'wire: P3DS_VERSION', $http->lastParams['P3DS_VERSION'], '2');
+check($t, 'wire: java TRUE/FALSE', $http->lastParams['P3DS_JAVA_ENABLED'], 'FALSE');
+check($t, 'wire: color depth', $http->lastParams['P3DS_BROWSER_COLOR_DEPTH'], '24');
+check($t, 'wire: tz positive', $http->lastParams['P3DS_BROWSER_TIME_ZONE'], '480');
+
+$t = '3ds/enrollment-requires-browser';
+$req = basicRequest();
+$req->threeDS = new \Inovio\Gateway\Model\ThreeDS('R-1-1', 'https://merchant.example/r');
+$threw = null;
+try {
+    client(new MockHttp([]))->sale($req);
+} catch (Throwable $e) {
+    $threw = $e;
+}
+check($t, 'missing browser -> ValidationException', $threw instanceof ValidationException, true);
+
+$t = '3ds/complete';
+$http = new MockHttp([
+    'REQUEST_ACTION' => 'CCAUTHCAP', 'TRANS_STATUS_NAME' => 'APPROVED',
+    'TRANS_VALUE' => '10.00', 'CURR_CODE_ALPHA' => 'USD', 'TRANS_ID' => 'T-3004',
+    'PO_ID' => 'PO-3004', 'API_RESPONSE' => '0', 'SERVICE_RESPONSE' => '100',
+    'P3DS_ECI' => '05', 'P3DS_CAVV' => 'AAABBJkZUQAAAABjRWWZEEFgFz8=',
+    'P3DS_TRANSID' => 'e21-67801d7ab7e1', 'P3DS_RESPONSE' => 'Frictionless Authentication',
+]);
+$req = basicRequest();
+$req->browser = new \Inovio\Gateway\Model\BrowserData('en-US', 'Mozilla/5.0', 'text/html');
+$req->threeDS = new \Inovio\Gateway\Model\ThreeDS('R-3001-148', 'https://merchant.example/3ds-return');
+// The ACS RESPONSE may be empty; it must still be SENT as REQUEST_PARES=''.
+$r = client($http)->threeDSecure()->completeSale(
+    $req,
+    new \Inovio\Gateway\Model\ThreeDSChallengeResult('3DS-77', '')
+);
+check($t, 'status', $r->status, 'APPROVED');
+check($t, 'wire: P3DS_PROCTRANSID', $http->lastParams['P3DS_PROCTRANSID'], '3DS-77');
+check($t, 'wire: empty REQUEST_PARES still sent', array_key_exists('REQUEST_PARES', $http->lastParams), true);
+check($t, 'wire: enrollment cleared', array_key_exists('REQUEST_ENROLLMENT', $http->lastParams), false);
+check($t, 'threeDS.eci', $r->threeDS?->eci, '05');
+check($t, 'threeDS.cavv', $r->threeDS?->cavv, 'AAABBJkZUQAAAABjRWWZEEFgFz8=');
+check($t, 'threeDS.response', $r->threeDS?->response, 'Frictionless Authentication');
+
+$t = '3ds/external-provider';
+$http = new MockHttp([
+    'REQUEST_ACTION' => 'CCAUTHCAP', 'TRANS_STATUS_NAME' => 'APPROVED',
+    'TRANS_VALUE' => '10.00', 'CURR_CODE_ALPHA' => 'USD', 'PO_ID' => 'PO-3005',
+    'API_RESPONSE' => '0', 'SERVICE_RESPONSE' => '100',
+]);
+$req = basicRequest();
+$req->threeDSResult = new \Inovio\Gateway\Model\ThreeDSResult('cavv-x', '05', 'ds-trans-1', '2', 'xid-1');
+$r = client($http)->sale($req);
+check($t, 'status', $r->status, 'APPROVED');
+check($t, 'wire: P3DS_CAVV', $http->lastParams['P3DS_CAVV'], 'cavv-x');
+check($t, 'wire: P3DS_ECI', $http->lastParams['P3DS_ECI'], '05');
+check($t, 'wire: P3DS_TRANSID', $http->lastParams['P3DS_TRANSID'], 'ds-trans-1');
+check($t, 'wire: P3DS_XID', $http->lastParams['P3DS_XID'], 'xid-1');
+
+$t = '3ds/mutually-exclusive-blocks';
+$req = basicRequest();
+$req->browser = new \Inovio\Gateway\Model\BrowserData('en-US', 'UA', 'hdr');
+$req->threeDS = new \Inovio\Gateway\Model\ThreeDS('R-1-1', 'https://merchant.example/r');
+$req->threeDSResult = new \Inovio\Gateway\Model\ThreeDSResult('c', '05', 't');
+$threw = null;
+try {
+    client(new MockHttp([]))->sale($req);
+} catch (Throwable $e) {
+    $threw = $e;
+}
+check($t, 'two blocks -> ValidationException', $threw instanceof ValidationException, true);
+
 // ------------------------------------------------------------------ report
 echo "\n";
 foreach ($failures as $f) {

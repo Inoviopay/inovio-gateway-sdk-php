@@ -110,7 +110,28 @@ final class ResultMapper
                 (string) $cvvRaw
             ) : null,
             card: self::card($r),
-            nextAction: self::nextAction($r, $status)
+            nextAction: self::nextAction($r, $status),
+            threeDS: self::threeDS($r)
+        );
+    }
+
+    /** @param array<string,string> $r */
+    private static function threeDS(array $r): ?ThreeDSAuth
+    {
+        if (
+            self::val($r, 'P3DS_ECI') === null && self::val($r, 'P3DS_CAVV') === null
+            && self::val($r, 'P3DS_RESPONSE') === null && self::val($r, 'P3DS_TRANSID') === null
+        ) {
+            return null;
+        }
+
+        return new ThreeDSAuth(
+            eci: self::val($r, 'P3DS_ECI'),
+            cavv: self::val($r, 'P3DS_CAVV'),
+            transId: self::val($r, 'P3DS_TRANSID'),
+            response: self::val($r, 'P3DS_RESPONSE'),
+            vendor: self::val($r, 'P3DS_VENDOR'),
+            version: self::val($r, 'P3DS_PROCVERSION'),
         );
     }
 
