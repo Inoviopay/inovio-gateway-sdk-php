@@ -10,7 +10,7 @@
     "ext-curl": "*"
   },
   "autoload": {
-    "psr-4": { "Inovio\\Gateway\\": "src/" }
+    "classmap": ["src/"]
   },
   "config": { "sort-packages": true }
 }
