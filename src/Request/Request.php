@@ -308,6 +308,10 @@ final class RequestBuilder
             // The ACS may return an empty RESPONSE; the spec requires sending
             // REQUEST_PARES as the empty value, so bypass put()'s blank filter.
             $p['REQUEST_PARES'] = $req->threeDSChallenge->pares;
+            // The gateway needs the protocol version on the completion leg to
+            // recognize it as a 3DS-2 finalization (verified against the working
+            // 3ds-tool finalize payload; without it the completion declines).
+            self::put($p, 'P3DS_VERSION', $req->threeDSChallenge->version);
         }
         if ($req->threeDSResult !== null) {
             self::put($p, 'P3DS_CAVV', $req->threeDSResult->cavv);

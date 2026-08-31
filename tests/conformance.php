@@ -511,6 +511,7 @@ $r = client($http)->threeDSecure()->completeSale(
 check($t, 'status', $r->status, 'APPROVED');
 check($t, 'wire: P3DS_PROCTRANSID', $http->lastParams['P3DS_PROCTRANSID'], '3DS-77');
 check($t, 'wire: empty REQUEST_PARES still sent', array_key_exists('REQUEST_PARES', $http->lastParams), true);
+check($t, 'wire: P3DS_VERSION on completion', $http->lastParams['P3DS_VERSION'] ?? null, '2');
 check($t, 'wire: enrollment cleared', array_key_exists('REQUEST_ENROLLMENT', $http->lastParams), false);
 check($t, 'threeDS.eci', $r->threeDS?->eci, '05');
 check($t, 'threeDS.cavv', $r->threeDS?->cavv, 'AAABBJkZUQAAAABjRWWZEEFgFz8=');
